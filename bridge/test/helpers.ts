@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { Hono } from 'hono'
-import { createApp } from '../src/app.js'
+import { createApp } from '../src/create-app.js'
 import { CHATGPT_CLIENT_ID_PATTERNS, DEFAULTS, type Config } from '../src/config.js'
 import type { Deps, FetchLike } from '../src/deps.js'
 import { MemoryStore } from '../src/store.js'

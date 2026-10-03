@@ -1,6 +1,6 @@
 /** Wires real config and storage for a deployed or locally run bridge. */
 import { Redis } from '@upstash/redis'
-import { createApp } from './app.js'
+import { createApp } from './create-app.js'
 import { configFromEnv } from './config.js'
 import { defaultDeps } from './deps.js'
 import { MemoryStore, UpstashStore, type Store } from './store.js'
