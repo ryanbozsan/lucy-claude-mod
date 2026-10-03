@@ -1,7 +1,7 @@
 {
   "name": "lucy-ping",
-  "version": "0.1.0",
-  "description": "Ring Lucy's doorbell: /lucy-ping sends one authenticated test event to the bridge.",
+  "version": "0.2.0",
+  "description": "Ring Lucy's doorbell from Claude Code: /lucy-ping [send <text> | retry | status [eventId]] through the Lucy bridge.",
   "author": {
     "name": "Ryan Bozsan"
   },
