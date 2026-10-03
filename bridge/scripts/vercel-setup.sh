@@ -35,11 +35,19 @@ done
 echo "== 3/5 first production deploy (to learn the public URL) =="
 DEPLOY_URL="$(vc deploy --prod --yes --scope "$SCOPE" 2>/dev/null | tail -1)"
 echo "deployment: $DEPLOY_URL"
-PUBLIC_URL="https://$PROJECT.vercel.app"
-if ! curl -fsS -o /dev/null -w '%{http_code}' "$PUBLIC_URL/healthz" | grep -qE '^(200|500)$'; then
-  echo "!! $PUBLIC_URL did not answer; find the production alias in the Vercel dashboard and re-run with PUBLIC_URL=<alias>"
+PUBLIC_URL="${PUBLIC_URL:-https://$PROJECT.vercel.app}"
+# The production alias can take a few seconds to attach after the first deploy.
+code=000
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  code="$(curl -s -o /dev/null -w '%{http_code}' "$PUBLIC_URL/healthz" || true)"
+  case "$code" in 200|500) break ;; esac
+  sleep 5
+done
+if ! echo "$code" | grep -qE '^(200|500)$'; then
+  echo "!! $PUBLIC_URL answered $code; find the production alias in the Vercel dashboard and re-run with PUBLIC_URL=<alias> $0"
   exit 1
 fi
+echo "production alias: $PUBLIC_URL (answered $code before BRIDGE_PUBLIC_URL is set; 500 is expected here)"
 
 echo "== 4/5 BRIDGE_PUBLIC_URL=$PUBLIC_URL and redeploy =="
 for env in production preview; do
