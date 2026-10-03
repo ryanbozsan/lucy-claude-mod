@@ -1,0 +1,11 @@
+{
+  "name": "lucy-mod-private",
+  "owner": { "name": "Ryan Bozsan" },
+  "plugins": [
+    {
+      "name": "lucy-ping",
+      "source": "./mod",
+      "description": "Send an authenticated Lucy Bridge doorbell event from Claude Code."
+    }
+  ]
+}
