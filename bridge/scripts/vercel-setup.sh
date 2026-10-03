@@ -18,7 +18,7 @@ echo "== 1/5 Upstash Redis (Vercel Marketplace, free plan unless you pick anothe
 if vc env ls --scope "$SCOPE" 2>/dev/null | grep -q UPSTASH_REDIS_REST_URL; then
   echo "already connected"
 else
-  vc integration add upstash --scope "$SCOPE" --name lucy-bridge-redis --no-env-pull
+  vc integration add upstash/upstash-kv --scope "$SCOPE" --name lucy-bridge-redis --no-env-pull
 fi
 
 echo "== 2/5 secrets from $SECRETS (values not shown) =="
