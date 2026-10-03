@@ -15,7 +15,7 @@ cd "$BRIDGE_DIR"
 [ -f .vercel/project.json ] || vc link --yes --scope "$SCOPE" --project "$PROJECT"
 
 echo "== 1/5 Upstash Redis (Vercel Marketplace, free plan unless you pick another) =="
-if vc env ls --scope "$SCOPE" 2>/dev/null | grep -q UPSTASH_REDIS_REST_URL; then
+if vc env ls --scope "$SCOPE" 2>/dev/null | grep -qE "KV_REST_API_URL|UPSTASH_REDIS_REST_URL"; then
   echo "already connected"
 else
   vc integration add upstash/upstash-kv --scope "$SCOPE" --name lucy-bridge-redis --no-env-pull

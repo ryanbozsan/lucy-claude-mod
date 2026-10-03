@@ -8,10 +8,14 @@ import { MemoryStore, UpstashStore, type Store } from './store.js'
 export function buildApp(env: Record<string, string | undefined> = process.env) {
   const config = configFromEnv(env)
   let store: Store
-  if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
-    store = new UpstashStore(new Redis({ url: env.UPSTASH_REDIS_REST_URL, token: env.UPSTASH_REDIS_REST_TOKEN }))
+  // The Vercel Marketplace install of "Upstash for Redis" injects KV_REST_API_*;
+  // a direct Upstash setup uses UPSTASH_REDIS_REST_*. Accept either.
+  const redisUrl = env.KV_REST_API_URL || env.UPSTASH_REDIS_REST_URL
+  const redisToken = env.KV_REST_API_TOKEN || env.UPSTASH_REDIS_REST_TOKEN
+  if (redisUrl && redisToken) {
+    store = new UpstashStore(new Redis({ url: redisUrl, token: redisToken }))
   } else if (env.VERCEL) {
-    throw new Error('UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required on Vercel: subscriptions must survive cold starts')
+    throw new Error('KV_REST_API_URL/KV_REST_API_TOKEN (or UPSTASH_REDIS_REST_URL/TOKEN) are required on Vercel: subscriptions must survive cold starts')
   } else {
     console.warn('lucy-bridge: no Upstash configured; using in-memory store (dev only)')
     store = new MemoryStore()
