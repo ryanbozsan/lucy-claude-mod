@@ -20,7 +20,7 @@ type PingRecord = {
   eventId: string
   timestamp: string
   attempts: number
-  status: 'pending' | 'delivered' | 'no_subscribers' | 'failed'
+  status: 'pending' | 'delivered' | 'partial' | 'no_subscribers' | 'failed'
   detail?: string
 }
 
@@ -114,6 +114,15 @@ export const register: Register = (on, options) => {
           `lucy-ping: event ${record.eventId} delivered to the bridge's subscriber(s) at ${record.timestamp}${reply.idempotent ? ' (already delivered earlier; not re-sent)' : ''}.`,
           `Next: check Lucy's chat for an acknowledgement of event ID ${record.eventId}.`,
         ].join('\n'),
+      }
+    }
+    if (status === 'partial') {
+      // Some subscriber got it, at least one did not: not done. Keep the same event ID for retry.
+      record.status = 'partial'
+      record.detail = describe(reply)
+      await $.store.set(PENDING, record)
+      return {
+        text: `lucy-ping: event ${record.eventId} reached only some subscribers (${describe(reply)}). Run /lucy-ping retry to resend the same event ID to the rest.`,
       }
     }
     if (status === 'no_subscribers') {

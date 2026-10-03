@@ -23,7 +23,8 @@ export type PingRecord = {
   eventId: string
   receivedAt: string
   event: EventEnvelope
-  status: 'delivered' | 'failed' | 'no_subscribers'
+  /** delivered = every active subscription got it; partial = some did, retry will reach the rest. */
+  status: 'delivered' | 'partial' | 'failed' | 'no_subscribers'
   deliveries: DeliveryRecord[]
   pings: number
 }
@@ -132,7 +133,9 @@ export function pingRoutes(deps: Deps): Hono {
     // Keep history for subscriptions no longer active.
     for (const d of record.deliveries) if (!deliveries.some(x => x.subscriptionId === d.subscriptionId)) deliveries.push(d)
     record.deliveries = deliveries
-    record.status = deliveries.some(d => d.status === 'delivered') ? 'delivered' : 'failed'
+    const active = subs.map(s => s.id)
+    const done = active.filter(id => deliveries.some(d => d.subscriptionId === id && d.status === 'delivered'))
+    record.status = done.length === active.length ? 'delivered' : done.length > 0 ? 'partial' : 'failed'
     await deps.store.set(key, record, { ttlSeconds: 30 * 24 * 3600 })
     deps.log('ping.result', { eventId, status: record.status, deliveries: deliveries.map(d => ({ id: d.subscriptionId, status: d.status, http: d.httpStatus, attempts: d.attempts })) })
     return c.json(record)

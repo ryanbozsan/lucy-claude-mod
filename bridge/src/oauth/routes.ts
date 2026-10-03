@@ -152,13 +152,13 @@ export function oauthRoutes(deps: Deps): Hono {
     const form = await c.req.parseBody()
     const requestId = typeof form.request_id === 'string' ? form.request_id : ''
     const passphrase = typeof form.passphrase === 'string' ? form.passphrase : ''
-    const req = requestId ? await deps.store.get<AuthRequest>(keys.authreq(requestId)) : undefined
-    if (!req) return c.html(page('Expired', `<h1>This approval request has expired.</h1><p>Start the connection again from ChatGPT.</p>`), 400)
+    // Taken atomically: one approval request yields at most one code, whatever the passphrase outcome.
+    const req = requestId ? await deps.store.take<AuthRequest>(keys.authreq(requestId)) : undefined
+    if (!req) return c.html(page('Expired', `<h1>This approval request has expired or was already used.</h1><p>Start the connection again from ChatGPT.</p>`), 400)
     if (!safeEqual(passphrase, config.ownerPassphrase)) {
       deps.log('oauth.consent.denied', { clientId: req.clientId })
-      return c.html(page('Not approved', `<h1>Passphrase did not match.</h1><p class="err">Go back and try again, or start over from ChatGPT.</p>`), 401)
+      return c.html(page('Not approved', `<h1>Passphrase did not match.</h1><p class="err">Start over from ChatGPT and try again.</p>`), 401)
     }
-    await deps.store.delete(keys.authreq(requestId))
     const code = await issueCode(
       { clientId: req.clientId, redirectUri: req.redirectUri, codeChallenge: req.codeChallenge, scope: req.scope, resource: req.resource, subject: config.ownerSubject, issuedAt: deps.now().toISOString() },
       deps,

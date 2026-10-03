@@ -7,6 +7,8 @@ export interface Store {
   get<T = unknown>(key: string): Promise<T | undefined>
   set(key: string, value: unknown, opts?: { ttlSeconds?: number }): Promise<void>
   delete(key: string): Promise<void>
+  /** Returns the value and removes it in one step, so a single-use credential is redeemed at most once. */
+  take<T = unknown>(key: string): Promise<T | undefined>
   /** Every value whose key starts with `prefix`. Small collections only. */
   list<T = unknown>(prefix: string): Promise<Array<{ key: string; value: T }>>
 }
@@ -33,6 +35,14 @@ export class MemoryStore implements Store {
   async delete(key: string): Promise<void> {
     this.map.delete(key)
   }
+  async take<T>(key: string): Promise<T | undefined> {
+    // No await between the read and the delete: two concurrent takes cannot both win.
+    const row = this.map.get(key)
+    this.map.delete(key)
+    if (!row) return undefined
+    if (row.expiresAt !== undefined && row.expiresAt <= this.now()) return undefined
+    return JSON.parse(row.value) as T
+  }
   async list<T>(prefix: string): Promise<Array<{ key: string; value: T }>> {
     const out: Array<{ key: string; value: T }> = []
     for (const key of [...this.map.keys()]) {
@@ -48,6 +58,7 @@ type UpstashLike = {
   get: (key: string) => Promise<unknown>
   set: (key: string, value: string, opts: { ex: number }) => Promise<unknown>
   del: (key: string) => Promise<unknown>
+  getdel: (key: string) => Promise<unknown>
   scan: (cursor: string | number, opts: { match: string; count?: number }) => Promise<[string | number, string[]]>
 }
 
@@ -67,6 +78,11 @@ export class UpstashStore implements Store {
   }
   async delete(key: string): Promise<void> {
     await this.redis.del(key)
+  }
+  async take<T>(key: string): Promise<T | undefined> {
+    const raw = await this.redis.getdel(key) // atomic on the server
+    if (raw === null || raw === undefined) return undefined
+    return typeof raw === 'string' ? (JSON.parse(raw) as T) : (raw as T)
   }
   async list<T>(prefix: string): Promise<Array<{ key: string; value: T }>> {
     const out: Array<{ key: string; value: T }> = []

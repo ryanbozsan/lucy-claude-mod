@@ -5,8 +5,9 @@
  */
 import { isIP } from 'node:net'
 import type { Deps } from './deps.js'
-import { b64url, isRecord, parseJson } from './util.js'
+import { b64url, isRecord, parseJson, safeEqual } from './util.js'
 import { randomBytes } from 'node:crypto'
+import { sign } from './webhooks.js'
 
 export class CallbackError extends Error {
   constructor(
@@ -69,17 +70,30 @@ export async function assertPublicHttpsUrl(url: string, deps: Deps): Promise<URL
   return u
 }
 
-/** POSTs a verification challenge and requires it echoed back with a 2xx. */
-export async function verifyCallback(url: string, deps: Deps): Promise<void> {
+/**
+ * POSTs a verification challenge, signed like a delivery with the subscription's
+ * secret and carrying the subscription id, and requires the challenge echoed
+ * back with a 2xx. The subscription id therefore exists before verification.
+ */
+export async function verifyCallback(url: string, secret: string, subscriptionId: string, deps: Deps): Promise<void> {
   const challenge = b64url(randomBytes(24))
+  const body = JSON.stringify({ type: 'verification', challenge })
+  const msgId = `msg_verification_${b64url(randomBytes(9))}`
+  const ts = Math.floor(deps.now().getTime() / 1000)
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), deps.config.verificationTimeoutMs)
   let res: Response
   try {
     res = await deps.fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ type: 'verification', challenge }),
+      headers: {
+        'content-type': 'application/json',
+        'webhook-id': msgId,
+        'webhook-timestamp': String(ts),
+        'webhook-signature': sign(secret, msgId, ts, body),
+        'X-MCP-Subscription-Id': subscriptionId,
+      },
+      body,
       signal: ctrl.signal,
     })
   } catch (err) {
@@ -89,6 +103,8 @@ export async function verifyCallback(url: string, deps: Deps): Promise<void> {
   }
   clearTimeout(timer)
   if (!res.ok) throw new CallbackError('challenge_failed', `callback verification answered HTTP ${res.status}`)
-  const body = parseJson(await res.text())
-  if (!isRecord(body) || body.challenge !== challenge) throw new CallbackError('challenge_failed', 'callback did not echo the challenge')
+  const answer = parseJson(await res.text())
+  if (!isRecord(answer) || typeof answer.challenge !== 'string' || !safeEqual(answer.challenge, challenge)) {
+    throw new CallbackError('challenge_failed', 'callback did not echo the challenge')
+  }
 }

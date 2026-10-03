@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { verify } from '../src/webhooks.js'
-import { SECRET, World } from './helpers.js'
+import { CALLBACK_URL, CALLBACK_URL_2, SECRET, SECRET_2, World } from './helpers.js'
 
 type Reply = { eventId: string; status: string; idempotent?: boolean; deliveries: Array<{ subscriptionId: string; status: string; httpStatus?: number; attempts: number }> }
 
@@ -107,6 +107,30 @@ describe('POST /ping (the doorbell button)', () => {
     w2.receiverStatuses = [413]
     const big = (await (await w2.ping('77777777-7777-4777-8777-777777777777')).json()) as Reply
     expect(big.deliveries[0]).toMatchObject({ status: 'rejected', attempts: 1 })
+  })
+
+  it('reports partial when one subscriber fails, and a retry reaches only the one still missing', async () => {
+    const w = new World()
+    const { access } = await w.obtainToken()
+    await w.subscribe(access, CALLBACK_URL, SECRET)
+    await w.subscribe(access, CALLBACK_URL_2, SECRET_2)
+    const id = '99999999-9999-4999-8999-999999999999'
+    w.receiverStatusesByUrl[CALLBACK_URL_2] = [500, 500, 500]
+    const first = (await (await w.ping(id)).json()) as Reply
+    expect(first.status).toBe('partial')
+    expect(first.idempotent).toBeUndefined()
+    const byUrl = (u: string) => w.deliveries.filter(d => d.url === u).length
+    expect(byUrl(CALLBACK_URL)).toBe(1)
+    expect(byUrl(CALLBACK_URL_2)).toBe(3)
+
+    const retry = (await (await w.ping(id)).json()) as Reply
+    expect(retry.status).toBe('delivered')
+    expect(byUrl(CALLBACK_URL)).toBe(1) // the one that already had it is not sent again
+    expect(byUrl(CALLBACK_URL_2)).toBe(4)
+    expect(w.deliveries.every(d => d.headers['webhook-id'] === id)).toBe(true)
+
+    const third = (await (await w.ping(id)).json()) as Reply
+    expect(third.idempotent).toBe(true)
   })
 
   it('does not deliver to an expired subscription', async () => {

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { Hono } from 'hono'
+import { verify } from '../src/webhooks.js'
 import { createApp } from '../src/create-app.js'
 import { CHATGPT_CLIENT_ID_PATTERNS, DEFAULTS, type Config } from '../src/config.js'
 import type { Deps, FetchLike } from '../src/deps.js'
@@ -11,8 +12,25 @@ export const PASSPHRASE = 'correct horse battery staple'
 export const CLIENT_ID = 'https://chatgpt.com/oauth/client.json'
 export const REDIRECT_URI = 'https://chatgpt.com/connector_platform_oauth_redirect'
 export const CALLBACK_URL = 'https://receiver.example.test/mcp-events/callback_123'
+export const CALLBACK_URL_2 = 'https://receiver.example.test/mcp-events/callback_456'
 /** whsec_ + base64 of 32 bytes */
 export const SECRET = 'whsec_' + Buffer.alloc(32, 7).toString('base64')
+export const SECRET_2 = 'whsec_' + Buffer.alloc(32, 9).toString('base64')
+
+/** ChatGPT's real Client ID Metadata Document, fetched 2026-10-03 from https://chatgpt.com/oauth/client.json. */
+export const CHATGPT_CIMD = {
+  client_id: 'https://chatgpt.com/oauth/client.json',
+  client_uri: 'https://chatgpt.com/',
+  redirect_uris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
+  token_endpoint_auth_method: 'private_key_jwt',
+  token_endpoint_auth_methods_supported: ['none', 'private_key_jwt'],
+  grant_types: ['authorization_code', 'refresh_token'],
+  response_types: ['code'],
+  client_name: 'ChatGPT',
+  logo_uri: 'https://persistent.oaistatic.com/sonic/misc/openai-logo.png',
+  token_endpoint_auth_signing_alg: 'RS256',
+  jwks_uri: 'https://chatgpt.com/oauth/jwks.json',
+}
 
 export function testConfig(over: Partial<Config> = {}): Config {
   return {
@@ -46,7 +64,13 @@ export type Outbound = { url: string; init: RequestInit; headers: Record<string,
 export class World {
   readonly outbound: Outbound[] = []
   readonly deliveries: Outbound[] = []
+  /** Per-delivery receiver answers, consumed in order; per-URL list first, then the shared one, then 200. */
   receiverStatuses: number[] = []
+  receiverStatusesByUrl: Record<string, number[]> = {}
+  /** What the fake ChatGPT serves as its client document. */
+  cimd: Record<string, unknown> = CHATGPT_CIMD
+  /** Secrets the fake receiver knows per callback URL, to enforce signed verification like ChatGPT does. */
+  receiverSecrets: Record<string, string> = { [CALLBACK_URL]: SECRET, [CALLBACK_URL_2]: SECRET_2 }
   nowMs = Date.UTC(2026, 9, 3, 12, 0, 0)
   readonly store = new MemoryStore(() => this.nowMs)
   readonly logs: Array<{ line: string; fields?: Record<string, unknown> }> = []
@@ -60,16 +84,23 @@ export class World {
       const call: Outbound = { url, init, headers, body }
       this.outbound.push(call)
       if (url === CLIENT_ID) {
-        return new Response(JSON.stringify({ client_id: CLIENT_ID, client_name: 'ChatGPT', redirect_uris: [REDIRECT_URI], token_endpoint_auth_method: 'none' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        })
+        return new Response(JSON.stringify(this.cimd), { status: 200, headers: { 'content-type': 'application/json' } })
       }
-      if (url === CALLBACK_URL) {
+      const secret = this.receiverSecrets[url]
+      if (secret) {
+        // Like ChatGPT: every request to the callback, verification included, must be signed and name the subscription.
+        const id = headers['webhook-id']
+        const ts = Number(headers['webhook-timestamp'])
+        const sig = headers['webhook-signature'] ?? ''
+        if (!id || !Number.isFinite(ts) || !verify(secret, id, ts, body, sig)) return new Response('bad signature', { status: 401 })
+        if (!headers['x-mcp-subscription-id']) return new Response('missing X-MCP-Subscription-Id', { status: 400 })
         const parsed = JSON.parse(body) as { type?: string; challenge?: string }
-        if (parsed.type === 'verification') return Response.json({ challenge: parsed.challenge })
+        if (parsed.type === 'verification') {
+          if (!id.startsWith('msg_verification_')) return new Response('verification webhook-id must be msg_verification_*', { status: 400 })
+          return Response.json({ challenge: parsed.challenge })
+        }
         this.deliveries.push(call)
-        const status = this.receiverStatuses.shift() ?? 200
+        const status = this.receiverStatusesByUrl[url]?.shift() ?? this.receiverStatuses.shift() ?? 200
         return new Response(status === 200 ? '{}' : 'nope', { status })
       }
       return new Response('not found', { status: 404 })

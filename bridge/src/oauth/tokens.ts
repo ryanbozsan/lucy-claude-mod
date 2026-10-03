@@ -15,13 +15,9 @@ export async function issueCode(code: AuthCode, deps: Deps): Promise<string> {
   return token
 }
 
-/** Takes the code (single use). */
+/** Takes the code (single use, atomically: concurrent redemptions cannot both succeed). */
 export async function redeemCode(token: string, deps: Deps): Promise<AuthCode | undefined> {
-  const k = keys.code(hash(token))
-  const row = await deps.store.get<AuthCode>(k)
-  if (!row) return undefined
-  await deps.store.delete(k)
-  return row
+  return deps.store.take<AuthCode>(keys.code(hash(token)))
 }
 
 export type IssuedTokens = { access_token: string; token_type: 'Bearer'; expires_in: number; refresh_token: string; scope: string }
@@ -57,11 +53,15 @@ export async function revokeToken(token: string, deps: Deps): Promise<void> {
   await deps.store.delete(keys.token(hash(token)))
 }
 
-/** Rotates a refresh token: the old one is spent, a new pair is issued in the same family. */
+/**
+ * Rotates a refresh token: the old one is spent atomically (so two concurrent
+ * refreshes cannot both succeed), and a new pair is issued in the same family.
+ */
 export async function rotateRefresh(refresh: string, clientId: string, deps: Deps): Promise<IssuedTokens | undefined> {
-  const row = await readToken(refresh, 'refresh', deps)
-  if (!row || row.clientId !== clientId) return undefined
-  await revokeToken(refresh, deps)
+  const row = await deps.store.take<TokenRow>(keys.token(hash(refresh)))
+  if (!row || row.kind !== 'refresh') return undefined
+  if (new Date(row.expiresAt).getTime() <= deps.now().getTime()) return undefined
+  if (row.clientId !== clientId) return undefined
   return issueTokens({ subject: row.subject, clientId: row.clientId, scope: row.scope, resource: row.resource }, deps, row.family)
 }
 

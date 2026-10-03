@@ -38,6 +38,12 @@ Lucy's chat shows the event ID   ← proof C
 - The bridge is idempotent on `eventId`: a retry re-delivers only what was not delivered, and every
   webhook attempt carries the same `webhook-id`/`eventId` with a fresh `webhook-timestamp` and signature,
   as the MCP Events draft requires. `410` retires the subscription; `413` is not retried.
+- `delivered` means every active subscription got it. If only some did, the bridge answers `partial`,
+  the mod keeps the event pending, and `/lucy-ping retry` reaches the rest with the same ID.
+- Single-use credentials (consent request, authorization code, refresh token) are consumed atomically
+  (`GETDEL` on Redis), so concurrent redemptions cannot both succeed.
+- The verification challenge sent during `events/subscribe` is signed with the subscription secret and
+  carries the subscription id, which is allocated before verification, as ChatGPT requires.
 
 ## Ownership and authentication
 

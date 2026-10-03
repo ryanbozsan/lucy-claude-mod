@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CALLBACK_URL, SECRET, World } from './helpers.js'
+import { verify } from '../src/webhooks.js'
 
 describe('MCP endpoint (2026-07-28) and MCP Events', () => {
   it('validates per-request metadata and headers the way the spec requires', async () => {
@@ -60,14 +61,21 @@ describe('MCP endpoint (2026-07-28) and MCP Events', () => {
     expect(json.result.cursor).toBeNull()
     expect(json.result.truncated).toBe(false)
     expect(new Date(json.result.refreshBefore).getTime()).toBe(w.nowMs + 7 * 24 * 3600 * 1000)
-    const verification = w.outbound.find(o => o.url === CALLBACK_URL)
-    expect(JSON.parse(verification!.body)).toMatchObject({ type: 'verification' })
+    // The verification request is signed with the subscription secret, carries a
+    // msg_verification_* id, and names the subscription id that is then returned.
+    const verification = w.outbound.find(o => o.url === CALLBACK_URL)!
+    expect(JSON.parse(verification.body)).toMatchObject({ type: 'verification' })
+    expect(verification.headers['webhook-id']).toMatch(/^msg_verification_/)
+    expect(verification.headers['x-mcp-subscription-id']).toBe(json.result.id)
+    expect(verify(SECRET, verification.headers['webhook-id']!, Number(verification.headers['webhook-timestamp']), verification.body, verification.headers['webhook-signature']!)).toBe(true)
 
     // Refresh: same identity (owner, event, args, url) keeps the id and extends the lifetime.
     w.nowMs += 1000
     const again = await w.subscribe(access, CALLBACK_URL, SECRET, { ttlMs: 60_000 })
     const j2 = (await again.json()) as { result: { id: string; refreshBefore: string } }
     expect(j2.result.id).toBe(json.result.id)
+    const reverification = w.outbound.filter(o => o.url === CALLBACK_URL && o.body.includes('verification')).at(-1)!
+    expect(reverification.headers['x-mcp-subscription-id']).toBe(json.result.id) // the refresh verifies under the same id
     expect(new Date(j2.result.refreshBefore).getTime()).toBe(w.nowMs + 60_000)
 
     const un = await w.rpc(access, 'events/unsubscribe', { name: 'lucy.ping', arguments: {}, delivery: { mode: 'webhook', url: CALLBACK_URL } }, 3)
@@ -86,6 +94,10 @@ describe('MCP endpoint (2026-07-28) and MCP Events', () => {
     expect((await code(await w.subscribe(access, 'https://private.example.test/cb'))).data?.reason).toBe('private_address')
     expect((await code(await w.subscribe(access, 'https://10.1.2.3/cb'))).data?.reason).toBe('private_address')
     expect((await code(await w.subscribe(access, CALLBACK_URL, 'whsec_short'))).code).toBe(-32602)
+    // A secret the receiver does not hold: the receiver rejects the signed verification, so nothing is registered.
+    const wrongSecret = await code(await w.subscribe(access, CALLBACK_URL, 'whsec_' + Buffer.alloc(32, 1).toString('base64')))
+    expect(wrongSecret.code).toBe(-32015)
+    expect(wrongSecret.data?.reason).toBe('challenge_failed')
     const failed = await code(await w.subscribe(access, 'https://other.example.test/cb')) // fake internet answers 404
     expect(failed.code).toBe(-32015)
     expect(failed.data?.reason).toBe('challenge_failed')

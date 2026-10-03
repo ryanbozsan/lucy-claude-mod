@@ -60,9 +60,15 @@ async function handleSubscribe(params: unknown, who: Principal, deps: Deps): Pro
   const ttl = params.ttlMs
   if (ttl !== undefined && ttl !== null && (typeof ttl !== 'number' || !(ttl > 0))) throw new RpcError(-32602, 'ttlMs must be a positive number or null')
 
+  // The subscription identity is (owner, event, arguments, callback url). A
+  // refresh keeps the id; a new subscription gets its id now, before
+  // verification, because the verification request carries it.
+  const existing = (await deps.store.list<Subscription>(SUB_PREFIX)).map(r => r.value).find(s => sameIdentity(s, who.subject, LUCY_PING, {}, url))
+  const id = existing?.id ?? randomId('sub_')
+
   try {
     await assertPublicHttpsUrl(url, deps)
-    await verifyCallback(url, deps)
+    await verifyCallback(url, secret, id, deps)
   } catch (err) {
     if (err instanceof CallbackError) throw new RpcError(-32015, `CallbackEndpointError: ${err.message}`, { reason: err.reason })
     throw err
@@ -73,11 +79,10 @@ async function handleSubscribe(params: unknown, who: Principal, deps: Deps): Pro
   const grantMs = Math.min(typeof ttl === 'number' ? ttl : subscriptionTtlMs, maxSubscriptionTtlMs)
   const refreshBefore = new Date(now.getTime() + grantMs).toISOString()
 
-  const existing = (await deps.store.list<Subscription>(SUB_PREFIX)).map(r => r.value).find(s => sameIdentity(s, who.subject, LUCY_PING, {}, url))
   const sub: Subscription = existing
     ? { ...existing, secret, clientId: who.clientId, refreshedAt: now.toISOString(), refreshBefore, deadAt: undefined }
     : {
-        id: randomId('sub_'),
+        id,
         owner: who.subject,
         clientId: who.clientId,
         name: LUCY_PING,

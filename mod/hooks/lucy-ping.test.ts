@@ -97,6 +97,25 @@ describe('/lucy-ping', () => {
     expect(retry.text).toContain('delivered')
   })
 
+  test('a partial delivery is not done: the same event ID is retried', OPTIONS, async ($, on) => {
+    mock.store(on)
+    mock.clock(on, { now: NOW })
+    const calls: Call[] = []
+    on('http.fetch', async (_$, e) => {
+      calls.push(e)
+      const status = calls.length === 1 ? 'partial' : 'delivered'
+      return reply(200, { eventId: sentId(e), status, deliveries: [{ subscriptionId: 'sub_a', status: 'delivered', attempts: 1 }, { subscriptionId: 'sub_b', status: calls.length === 1 ? 'failed' : 'delivered', attempts: 3 }] })
+    })
+    const first = await $.command.run({ command: 'lucy-ping', args: '' })
+    expect(first.text).toContain('only some subscribers')
+    expect(first.text).toContain('retry')
+    const second = await $.command.run({ command: 'lucy-ping', args: 'retry' })
+    expect(calls).toHaveLength(2)
+    expect(sentId(calls[1]!)).toBe(sentId(calls[0]!))
+    expect(second.text).toContain('delivered')
+    expect((await $.command.run({ command: 'lucy-ping', args: 'retry' })).text).toContain('nothing to retry')
+  })
+
   test('status asks the bridge about the last event', OPTIONS, async ($, on) => {
     mock.store(on, { 'last-ping': { eventId: 'evt-fixed', timestamp: '2026-10-03T11:00:00.000Z', attempts: 1, status: 'delivered' } })
     mock.clock(on, { now: NOW })

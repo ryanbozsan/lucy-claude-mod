@@ -58,9 +58,18 @@ async function fetchCimd(clientId: string, deps: Deps): Promise<RegisteredClient
   if (!Array.isArray(doc.redirect_uris) || doc.redirect_uris.some(u => typeof u !== 'string')) {
     throw new ClientError('invalid_client', 'client metadata lacks redirect_uris')
   }
-  const authMethod = (doc.token_endpoint_auth_method as string | undefined) ?? 'none'
-  if (authMethod !== 'none') {
-    throw new ClientError('invalid_client', `token_endpoint_auth_method ${authMethod} is not supported here (only none)`)
+  // ChatGPT's document lists `token_endpoint_auth_methods_supported` (a set, no
+  // preference) and, during a transition, the legacy singular
+  // `token_endpoint_auth_method` as a preference. The client picks from the
+  // intersection with what this authorization server advertises. We support
+  // only `none` (PKCE), so the document must include it somewhere.
+  const methods = Array.isArray(doc.token_endpoint_auth_methods_supported)
+    ? (doc.token_endpoint_auth_methods_supported as unknown[]).filter((m): m is string => typeof m === 'string')
+    : typeof doc.token_endpoint_auth_method === 'string'
+      ? [doc.token_endpoint_auth_method]
+      : ['none']
+  if (!methods.includes('none')) {
+    throw new ClientError('invalid_client', `client supports token endpoint auth [${methods.join(', ')}]; this server supports only none`)
   }
   const client: RegisteredClient = {
     client_id: clientId,
