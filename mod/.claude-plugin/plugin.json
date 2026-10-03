@@ -1,0 +1,24 @@
+{
+  "name": "lucy-ping",
+  "version": "0.1.0",
+  "description": "Ring Lucy's doorbell: /lucy-ping sends one authenticated test event to the bridge.",
+  "author": {
+    "name": "Ryan Bozsan"
+  },
+  "repository": "https://github.com/ryanbozsan/lucy-claude-mod",
+  "userConfig": {
+    "bridge_url": {
+      "type": "string",
+      "title": "Bridge URL",
+      "description": "Public HTTPS origin of the lucy bridge, e.g. https://lucy-bridge.vercel.app",
+      "required": true
+    },
+    "ping_token": {
+      "type": "string",
+      "title": "Ping token",
+      "description": "Bearer token the bridge expects on POST /ping (BRIDGE_PING_TOKEN).",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}
